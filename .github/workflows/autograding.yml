@@ -1,28 +1,40 @@
-name: Autograding - ASP.NET Core Lab 01
+name: Autograding Lab 02
 
 on:
   push:
     branches:
       - main
+      - master
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
-  checks: write
-  actions: read
+
+concurrency:
+  group: lab02-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   autograding:
-    name: Autograding
+    # Không chạy bộ chấm trên repository template.
     if: ${{ !endsWith(github.event.repository.name, '-template') }}
+
+    name: Check ASP.NET Core Lab 02
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
 
     steps:
-      - name: Checkout student repository
+      # ----------------------------------------------------------
+      # 1. Lấy mã nguồn
+      # ----------------------------------------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup .NET SDK
+      # ----------------------------------------------------------
+      # 2. Cài các phiên bản .NET được phép
+      # ----------------------------------------------------------
+      - name: Install supported .NET SDKs
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
@@ -30,86 +42,394 @@ jobs:
             9.0.x
             10.0.x
 
-      # 1 diem: tu dong tim project ASP.NET Core Web, khong bat buoc ten thu muc.
+      - name: Display .NET information
+        shell: bash
+        run: |
+          echo "Default .NET SDK:"
+          dotnet --version
+
+          echo "Installed .NET SDKs:"
+          dotnet --list-sdks
+
+      # ----------------------------------------------------------
+      # 3. Kiểm tra cấu trúc dự án - 1 điểm
+      # ----------------------------------------------------------
       - name: Check project structure
-        id: check-structure
-        uses: classroom-resources/autograding-command-grader@v1
-        with:
-          test-name: Check project structure
-          setup-command: ''
-          command: >-
-            bash -c 'PROJECT_FILE=$(grep -rl --include="*.csproj" "Microsoft.NET.Sdk.Web" . | head -n 1); test -n "$PROJECT_FILE"; echo "Found web project: $PROJECT_FILE"'
-          timeout: 1
-          max-score: 1
+        shell: bash
+        run: |
+          PROJECT_FILE="Lab02.Web/Lab02.Web.csproj"
+          PROGRAM_FILE="Lab02.Web/Program.cs"
+          CONTROLLER_FILE="Lab02.Web/Controllers/CourseController.cs"
+          INDEX_FILE="Lab02.Web/Views/Course/Index.cshtml"
+          STRUCTURE_FILE="Lab02.Web/Views/Course/Structure.cshtml"
+          CSS_FILE="Lab02.Web/wwwroot/css/lab02.css"
 
-      # 2 diem: tai va khoi phuc duoc cac goi phu thuoc.
-      - name: Restore dependencies
-        id: restore
-        uses: classroom-resources/autograding-command-grader@v1
-        with:
-          test-name: Restore dependencies
-          setup-command: ''
-          command: >-
-            bash -c 'PROJECT_FILE=$(grep -rl --include="*.csproj" "Microsoft.NET.Sdk.Web" . | head -n 1); test -n "$PROJECT_FILE"; dotnet restore "$PROJECT_FILE"'
-          timeout: 5
-          max-score: 2
+          check_file() {
+            local file="$1"
 
-      # 3 diem: ma nguon bien dich thanh cong.
-      - name: Build application
-        id: build
-        uses: classroom-resources/autograding-command-grader@v1
-        with:
-          test-name: Build application
-          setup-command: ''
-          command: >-
-            bash -c 'PROJECT_FILE=$(grep -rl --include="*.csproj" "Microsoft.NET.Sdk.Web" . | head -n 1); test -n "$PROJECT_FILE"; dotnet build "$PROJECT_FILE" --configuration Release'
-          timeout: 5
-          max-score: 3
-
-      # 4 diem: ung dung khoi dong va phan hoi HTTP.
-      # Khong dung launchSettings.json de tranh moi bai chay mot cong khac nhau.
-      - name: Run and test application
-        id: run-application
-        uses: classroom-resources/autograding-command-grader@v1
-        with:
-          test-name: Run and test application
-          setup-command: ''
-          command: >-
-            bash -c '
-              PROJECT_FILE=$(grep -rl --include="*.csproj" "Microsoft.NET.Sdk.Web" . | head -n 1);
-              test -n "$PROJECT_FILE";
-              echo "Running web project: $PROJECT_FILE";
-              dotnet run --project "$PROJECT_FILE" --configuration Release --no-launch-profile --urls "http://127.0.0.1:5050" > application.log 2>&1 &
-              APP_PID=$!;
-              cleanup() { kill "$APP_PID" 2>/dev/null || true; };
-              trap cleanup EXIT;
-              for i in {1..30}; do
-                if curl --silent --show-error "http://127.0.0.1:5050/" > /dev/null; then
-                  echo "Application started successfully.";
-                  exit 0;
-                fi;
-                if ! kill -0 "$APP_PID" 2>/dev/null; then
-                  echo "Application stopped before responding.";
-                  cat application.log;
-                  exit 1;
-                fi;
-                sleep 1;
-              done;
-              echo "Application did not respond within 30 seconds.";
-              cat application.log;
+            if [ ! -f "$file" ]; then
+              echo "::error::Không tìm thấy tệp bắt buộc: $file"
               exit 1
-            '
-          timeout: 2
-          max-score: 4
+            fi
+          }
 
-      # Bat buoc de day tong diem ve cot Score cua GitHub Classroom.
-      - name: Autograding Reporter
-        uses: classroom-resources/autograding-grading-reporter@v1
-        if: always()
-        env:
-          CHECK-STRUCTURE_RESULTS: "${{ steps.check-structure.outputs.result }}"
-          RESTORE_RESULTS: "${{ steps.restore.outputs.result }}"
-          BUILD_RESULTS: "${{ steps.build.outputs.result }}"
-          RUN-APPLICATION_RESULTS: "${{ steps.run-application.outputs.result }}"
-        with:
-          runners: check-structure,restore,build,run-application
+          check_file "$PROJECT_FILE"
+          check_file "$PROGRAM_FILE"
+          check_file "$CONTROLLER_FILE"
+          check_file "$INDEX_FILE"
+          check_file "$STRUCTURE_FILE"
+          check_file "$CSS_FILE"
+
+          echo "Cấu trúc dự án hợp lệ."
+
+      # ----------------------------------------------------------
+      # 4. Kiểm tra Target Framework - 1 điểm
+      # ----------------------------------------------------------
+      - name: Check target framework
+        shell: bash
+        run: |
+          PROJECT_FILE="Lab02.Web/Lab02.Web.csproj"
+
+          if ! grep -Eq \
+            '<TargetFramework>[[:space:]]*net(8|9|10)\.0[[:space:]]*</TargetFramework>' \
+            "$PROJECT_FILE"; then
+            echo "::error::Dự án phải sử dụng net8.0, net9.0 hoặc net10.0."
+            exit 1
+          fi
+
+          TARGET_FRAMEWORK=$(grep -Eo \
+            'net(8|9|10)\.0' \
+            "$PROJECT_FILE" | head -n 1)
+
+          echo "Target Framework hợp lệ: $TARGET_FRAMEWORK"
+
+      # ----------------------------------------------------------
+      # 5. Restore
+      # ----------------------------------------------------------
+      - name: Restore dependencies
+        run: |
+          dotnet restore "Lab02.Web/Lab02.Web.csproj"
+
+      # ----------------------------------------------------------
+      # 6. Build - 2 điểm
+      # ----------------------------------------------------------
+      - name: Build project
+        run: |
+          dotnet build "Lab02.Web/Lab02.Web.csproj" \
+            --configuration Release \
+            --no-restore
+
+      # ----------------------------------------------------------
+      # 7. Kiểm tra Controller và Action - 1 điểm
+      # ----------------------------------------------------------
+      - name: Check CourseController
+        shell: bash
+        run: |
+          FILE="Lab02.Web/Controllers/CourseController.cs"
+
+          if ! grep -Eq \
+            'class[[:space:]]+CourseController' \
+            "$FILE"; then
+            echo "::error::Không tìm thấy lớp CourseController."
+            exit 1
+          fi
+
+          if ! grep -Eq \
+            'IActionResult[[:space:]]+Index[[:space:]]*\(' \
+            "$FILE"; then
+            echo "::error::CourseController thiếu Action Index."
+            exit 1
+          fi
+
+          if ! grep -Eq \
+            'IActionResult[[:space:]]+Structure[[:space:]]*\(' \
+            "$FILE"; then
+            echo "::error::CourseController thiếu Action Structure."
+            exit 1
+          fi
+
+          echo "CourseController có đủ Action Index và Structure."
+
+      # ----------------------------------------------------------
+      # 8. Kiểm tra View Index - một phần của 1 điểm View
+      # ----------------------------------------------------------
+      - name: Check Course Index view
+        shell: bash
+        run: |
+          FILE="Lab02.Web/Views/Course/Index.cshtml"
+
+          check_text() {
+            local text="$1"
+
+            if ! grep -Fq "$text" "$FILE"; then
+              echo "::error::Index.cshtml thiếu nội dung: $text"
+              exit 1
+            fi
+          }
+
+          check_text "Công nghệ phát triển ứng dụng"
+          check_text "Bài thực hành 02"
+          check_text "Mô hình MVC"
+          check_text "Họ và tên"
+          check_text "Mã sinh viên"
+          check_text "Lớp"
+          check_text "lab02.css"
+
+          echo "Index.cshtml có đầy đủ nội dung bắt buộc."
+
+      # ----------------------------------------------------------
+      # 9. Kiểm tra cá nhân hóa
+      # ----------------------------------------------------------
+      - name: Check personalized information
+        shell: bash
+        run: |
+          FILE="Lab02.Web/Views/Course/Index.cshtml"
+
+          if grep -Fq "Nguyễn Văn A" "$FILE"; then
+            echo "::error::Sinh viên chưa thay họ tên mẫu."
+            exit 1
+          fi
+
+          if grep -Fq "DTC123456" "$FILE"; then
+            echo "::error::Sinh viên chưa thay mã sinh viên mẫu."
+            exit 1
+          fi
+
+          if grep -Fq "CNTT KXX" "$FILE"; then
+            echo "::error::Sinh viên chưa thay lớp mẫu."
+            exit 1
+          fi
+
+          if grep -Fq ".NET 8/9/10" "$FILE"; then
+            echo "::error::Sinh viên chưa ghi phiên bản .NET thực tế."
+            exit 1
+          fi
+
+          echo "Thông tin mẫu đã được cá nhân hóa."
+
+      # ----------------------------------------------------------
+      # 10. Kiểm tra View Structure
+      # ----------------------------------------------------------
+      - name: Check MVC Structure view
+        shell: bash
+        run: |
+          FILE="Lab02.Web/Views/Course/Structure.cshtml"
+
+          check_text() {
+            local text="$1"
+
+            if ! grep -Fq "$text" "$FILE"; then
+              echo "::error::Structure.cshtml thiếu nội dung: $text"
+              exit 1
+            fi
+          }
+
+          check_text "Model"
+          check_text "View"
+          check_text "Controller"
+          check_text "wwwroot"
+          check_text "Program.cs"
+          check_text "lab02.css"
+
+          echo "Structure.cshtml có đầy đủ nội dung bắt buộc."
+
+      # ----------------------------------------------------------
+      # 11. Kiểm tra CSS - 1 điểm
+      # ----------------------------------------------------------
+      - name: Check Lab 02 stylesheet
+        shell: bash
+        run: |
+          FILE="Lab02.Web/wwwroot/css/lab02.css"
+
+          check_css_class() {
+            local class_name="$1"
+
+            if ! grep -Fq "$class_name" "$FILE"; then
+              echo "::error::lab02.css thiếu class: $class_name"
+              exit 1
+            fi
+          }
+
+          check_css_class ".lab02-container"
+          check_css_class ".lab02-header"
+          check_css_class ".lab02-card"
+          check_css_class ".mvc-grid"
+          check_css_class ".lab02-button"
+
+          if [ ! -s "$FILE" ]; then
+            echo "::error::Tệp lab02.css đang rỗng."
+            exit 1
+          fi
+
+          echo "Tệp lab02.css hợp lệ."
+
+      # ----------------------------------------------------------
+      # 12. Kiểm tra mã nguồn endpoint /health
+      # ----------------------------------------------------------
+      - name: Check health endpoint source code
+        shell: bash
+        run: |
+          FILE="Lab02.Web/Program.cs"
+
+          if ! grep -Eq \
+            'MapGet[[:space:]]*\([[:space:]]*"/health"' \
+            "$FILE"; then
+            echo "::error::Không tìm thấy endpoint /health."
+            exit 1
+          fi
+
+          if ! grep -Fq "LAB02_OK" "$FILE"; then
+            echo "::error::Endpoint /health phải trả về LAB02_OK."
+            exit 1
+          fi
+
+          echo "Đã tìm thấy endpoint /health."
+
+      # ----------------------------------------------------------
+      # 13. Chạy và kiểm tra ứng dụng - 2 điểm
+      # ----------------------------------------------------------
+      - name: Run and test application
+        shell: bash
+        run: |
+          set -e
+
+          PROJECT_FILE="Lab02.Web/Lab02.Web.csproj"
+          APPLICATION_URL="http://127.0.0.1:5050"
+
+          dotnet run \
+            --project "$PROJECT_FILE" \
+            --configuration Release \
+            --no-build \
+            --no-launch-profile \
+            --urls "$APPLICATION_URL" \
+            > application.log 2>&1 &
+
+          APP_PID=$!
+
+          cleanup() {
+            kill "$APP_PID" 2>/dev/null || true
+          }
+
+          trap cleanup EXIT
+
+          APP_READY=false
+
+          for i in {1..30}; do
+            if curl \
+              --fail \
+              --silent \
+              "$APPLICATION_URL/health" \
+              > /dev/null; then
+              APP_READY=true
+              break
+            fi
+
+            if ! kill -0 "$APP_PID" 2>/dev/null; then
+              echo "::error::Ứng dụng đã dừng trước khi khởi động xong."
+              echo "----- Application log -----"
+              cat application.log
+              exit 1
+            fi
+
+            sleep 1
+          done
+
+          if [ "$APP_READY" != "true" ]; then
+            echo "::error::Ứng dụng không khởi động trong 30 giây."
+            echo "----- Application log -----"
+            cat application.log
+            exit 1
+          fi
+
+          HEALTH_RESULT=$(curl \
+            --fail \
+            --silent \
+            "$APPLICATION_URL/health")
+
+          if [ "$HEALTH_RESULT" != "LAB02_OK" ]; then
+            echo "::error::Endpoint /health không trả về LAB02_OK."
+            exit 1
+          fi
+
+          COURSE_PAGE=$(curl \
+            --fail \
+            --silent \
+            "$APPLICATION_URL/Course")
+
+          if ! printf "%s" "$COURSE_PAGE" \
+            | grep -Fq "Công nghệ phát triển ứng dụng"; then
+            echo "::error::Trang /Course thiếu nội dung bắt buộc."
+            exit 1
+          fi
+
+          STRUCTURE_PAGE=$(curl \
+            --fail \
+            --silent \
+            "$APPLICATION_URL/Course/Structure")
+
+          if ! printf "%s" "$STRUCTURE_PAGE" \
+            | grep -Fq "Cấu trúc ứng dụng ASP.NET Core MVC"; then
+            echo "::error::Trang /Course/Structure thiếu nội dung bắt buộc."
+            exit 1
+          fi
+
+          CSS_CONTENT=$(curl \
+            --fail \
+            --silent \
+            "$APPLICATION_URL/css/lab02.css")
+
+          if ! printf "%s" "$CSS_CONTENT" \
+            | grep -Fq ".lab02-container"; then
+            echo "::error::Không truy cập được nội dung lab02.css."
+            exit 1
+          fi
+
+          echo "Ứng dụng khởi động thành công."
+          echo "/Course hoạt động."
+          echo "/Course/Structure hoạt động."
+          echo "/health trả về LAB02_OK."
+          echo "/css/lab02.css hoạt động."
+
+      # ----------------------------------------------------------
+      # 14. Tổng hợp kết quả
+      # ----------------------------------------------------------
+      - name: Create autograding summary
+        if: success()
+        shell: bash
+        run: |
+          PROJECT_FILE="Lab02.Web/Lab02.Web.csproj"
+
+          TARGET_FRAMEWORK=$(grep -Eo \
+            'net(8|9|10)\.0' \
+            "$PROJECT_FILE" | head -n 1)
+
+          {
+            echo "# Kết quả chấm tự động - Bài thực hành 02"
+            echo ""
+            echo "| Nội dung | Kết quả | Điểm |"
+            echo "|---|---:|---:|"
+            echo "| Cấu trúc dự án | Đạt | 1/1 |"
+            echo "| Target Framework | $TARGET_FRAMEWORK | 1/1 |"
+            echo "| Biên dịch dự án | Đạt | 2/2 |"
+            echo "| Controller và Action | Đạt | 1/1 |"
+            echo "| Các View | Đạt | 1/1 |"
+            echo "| Chạy và kiểm tra URL | Đạt | 2/2 |"
+            echo "| Tệp CSS | Đạt | 1/1 |"
+            echo "| **Tổng điểm tự động** | | **9/9** |"
+            echo ""
+            echo "> Lịch sử commit do giảng viên đánh giá, tối đa 1 điểm."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ----------------------------------------------------------
+      # 15. Hiển thị log nếu thất bại
+      # ----------------------------------------------------------
+      - name: Display application log on failure
+        if: failure()
+        shell: bash
+        run: |
+          if [ -f "application.log" ]; then
+            echo "----- Application log -----"
+            cat application.log
+          else
+            echo "Ứng dụng chưa tạo application.log."
+          fi
