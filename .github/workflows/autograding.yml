@@ -1,0 +1,115 @@
+name: Autograding - ASP.NET Core Lab 01
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+  actions: read
+
+jobs:
+  autograding:
+    name: Autograding
+    if: ${{ !endsWith(github.event.repository.name, '-template') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout student repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      # 1 diem: tu dong tim project ASP.NET Core Web, khong bat buoc ten thu muc.
+      - name: Check project structure
+        id: check-structure
+        uses: classroom-resources/autograding-command-grader@v1
+        with:
+          test-name: Check project structure
+          setup-command: ''
+          command: >-
+            bash -c 'PROJECT_FILE=$(grep -rl --include="*.csproj" "Microsoft.NET.Sdk.Web" . | head -n 1); test -n "$PROJECT_FILE"; echo "Found web project: $PROJECT_FILE"'
+          timeout: 1
+          max-score: 1
+
+      # 2 diem: tai va khoi phuc duoc cac goi phu thuoc.
+      - name: Restore dependencies
+        id: restore
+        uses: classroom-resources/autograding-command-grader@v1
+        with:
+          test-name: Restore dependencies
+          setup-command: ''
+          command: >-
+            bash -c 'PROJECT_FILE=$(grep -rl --include="*.csproj" "Microsoft.NET.Sdk.Web" . | head -n 1); test -n "$PROJECT_FILE"; dotnet restore "$PROJECT_FILE"'
+          timeout: 5
+          max-score: 2
+
+      # 3 diem: ma nguon bien dich thanh cong.
+      - name: Build application
+        id: build
+        uses: classroom-resources/autograding-command-grader@v1
+        with:
+          test-name: Build application
+          setup-command: ''
+          command: >-
+            bash -c 'PROJECT_FILE=$(grep -rl --include="*.csproj" "Microsoft.NET.Sdk.Web" . | head -n 1); test -n "$PROJECT_FILE"; dotnet build "$PROJECT_FILE" --configuration Release'
+          timeout: 5
+          max-score: 3
+
+      # 4 diem: ung dung khoi dong va phan hoi HTTP.
+      # Khong dung launchSettings.json de tranh moi bai chay mot cong khac nhau.
+      - name: Run and test application
+        id: run-application
+        uses: classroom-resources/autograding-command-grader@v1
+        with:
+          test-name: Run and test application
+          setup-command: ''
+          command: >-
+            bash -c '
+              PROJECT_FILE=$(grep -rl --include="*.csproj" "Microsoft.NET.Sdk.Web" . | head -n 1);
+              test -n "$PROJECT_FILE";
+              echo "Running web project: $PROJECT_FILE";
+              dotnet run --project "$PROJECT_FILE" --configuration Release --no-launch-profile --urls "http://127.0.0.1:5050" > application.log 2>&1 &
+              APP_PID=$!;
+              cleanup() { kill "$APP_PID" 2>/dev/null || true; };
+              trap cleanup EXIT;
+              for i in {1..30}; do
+                if curl --silent --show-error "http://127.0.0.1:5050/" > /dev/null; then
+                  echo "Application started successfully.";
+                  exit 0;
+                fi;
+                if ! kill -0 "$APP_PID" 2>/dev/null; then
+                  echo "Application stopped before responding.";
+                  cat application.log;
+                  exit 1;
+                fi;
+                sleep 1;
+              done;
+              echo "Application did not respond within 30 seconds.";
+              cat application.log;
+              exit 1
+            '
+          timeout: 2
+          max-score: 4
+
+      # Bat buoc de day tong diem ve cot Score cua GitHub Classroom.
+      - name: Autograding Reporter
+        uses: classroom-resources/autograding-grading-reporter@v1
+        if: always()
+        env:
+          CHECK-STRUCTURE_RESULTS: "${{ steps.check-structure.outputs.result }}"
+          RESTORE_RESULTS: "${{ steps.restore.outputs.result }}"
+          BUILD_RESULTS: "${{ steps.build.outputs.result }}"
+          RUN-APPLICATION_RESULTS: "${{ steps.run-application.outputs.result }}"
+        with:
+          runners: check-structure,restore,build,run-application
